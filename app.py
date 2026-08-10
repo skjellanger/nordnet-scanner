@@ -5,7 +5,7 @@ import plotly.express as px
 import time
 import requests
 
-st.set_page_config(page_title="Oslo Børs Momentumskanner", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Oslo Børs Momentumskanner", page_icon="🚀", layout="wide")
 
 TICKERS = [
     "HEX.OL", "NEL.OL", "NOD.OL", "TOM.OL", "AZT.OL", "CRAY.OL", "DTR.OL",
@@ -20,17 +20,18 @@ TICKERS = [
     "KID.OL", "BOUV.OL", "LINK.OL", "PHO.OL"
 ]
 
-@st.cache_data(ttl=120) # Oppdaterer dataen automatisk hvert 2. minutt
+@st.cache_data(ttl=120)
 def analyze_stocks():
     scored_data = []
-    
-    # OPPDATERING: Ny, stabil standard-metode for opprettelse av sesjon mot Yahoo
     session = requests.Session()
     session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
     
+    # Definer minimumsgrensen for daglig omsetning i kroner (10 millioner NOK)
+    MIN_DAILY_TURNOVER_NOK = 10_000_000 
+    
     for ticker in TICKERS:
         try:
-            time.sleep(0.05) # Liten pause så vi ikke blir sperret
+            time.sleep(0.05)
             stock = yf.Ticker(ticker, session=session)
             df = stock.history(period="45d", interval="1d")
             
@@ -42,6 +43,14 @@ def analyze_stocks():
             avg_volume_20 = float(df['Volume'].iloc[-21:-1].mean())
             volume_ratio = latest_volume / avg_volume_20 if avg_volume_20 > 0 else 1.0
             
+            # --- KRITISK LIKVIDITETSFILTER ---
+            # Beregner gjennomsnittlig daglig omsetning i kroner de siste 20 dagene
+            avg_daily_turnover = avg_volume_20 * latest_close
+            
+            # Hvis aksjen omsetter for mindre enn 10 millioner kr i snitt, kastes den ut av listen med en gang!
+            if avg_daily_turnover < MIN_DAILY_TURNOVER_NOK:
+                continue
+                
             df['EMA9'] = df['Close'].ewm(span=9, adjust=False).mean()
             df['EMA21'] = df['Close'].ewm(span=21, adjust=False).mean()
             
@@ -51,7 +60,7 @@ def analyze_stocks():
             if pd.isna(latest_close) or pd.isna(ema9) or pd.isna(ema21) or pd.isna(volume_ratio):
                 continue
                 
-            # --- AGGRESSIV MATEMATISK SCORING (0 - 100) ---
+            # --- DYNAMISK MATEMATISK SCORING ---
             pct_above_ema9 = ((latest_close - ema9) / ema9) * 100
             ema_spread = ((ema9 - ema21) / ema21) * 100
             
@@ -77,8 +86,7 @@ def analyze_stocks():
                 "Aksje": str(ticker.replace(".OL", "")),
                 "Kurs (NOK)": round(latest_close, 2),
                 "Volum_Ratio": round(volume_ratio, 2),
-                "EMA9": round(ema9, 2),
-                "EMA21": round(ema21, 2),
+                "Snitt Omsetning (MNOK)": round(avg_daily_turnover / 1_000_000, 2),
                 "Super_Score": total_score
             })
         except:
@@ -87,30 +95,29 @@ def analyze_stocks():
     return pd.DataFrame(scored_data).sort_values(by="Super_Score", ascending=False) if scored_data else pd.DataFrame()
 
 # --- WEB-VISNING ---
-st.title("🚀 Oslo Børs Matematisk Momentumskanner")
-st.write("Dette kontrollpanelet rangerer aksjer live basert på volumavvik og trendlinje-spredning.")
+st.title("🚀 Oslo Børs Likviditetsfiltrert Momentumskanner")
+st.write("Viser KUN aksjer med høy omsetning (>10 mill. NOK daglig) der det er lett å selge seg ut raskt.")
 
 if st.button("🔄 Manuelt oppdater data nå"):
     st.cache_data.clear()
 
-with st.spinner("Henter og kalkulerer rådata fra Oslo Børs..."):
+with st.spinner("Henter og filtrerer likvide rådata..."):
     df_res = analyze_stocks()
 
 if df_res.empty:
-    st.error("Forbereder datastrømmen. Vennligst vent noen sekunder eller trykk på oppdateringsknappen.")
+    st.error("Ingen aksjer oppfyller kravene til både høy omsetning og momentum akkurat nå.")
 else:
-    col1, col2 = st.columns([1, 1.2]) # Balanserer bredden på kolonnene
+    col1, col2 = st.columns([1, 1.2])
     
     with col1:
-        st.subheader("🔥 Reelle Momentum-Ledere (Topp 15)")
+        st.subheader("🔥 Likvide Momentum-Ledere (Topp 15)")
         fig = px.bar(df_res.head(15), x='Super_Score', y='Aksje', orientation='h',
                      color='Super_Score', color_continuous_scale='Turbo', template='plotly_dark')
         fig.update_layout(yaxis={'categoryorder':'total ascending'}, height=600)
         st.plotly_chart(fig, use_container_width=True)
         
     with col2:
-        st.subheader("📊 Presisjonstabell for Daytrading")
-        # Formaterer tabellvisningen
+        st.subheader("📊 Sikker Tabell for Daytrading (Høy Likviditet)")
         df_display = df_res.copy()
         df_display["Volum_Ratio"] = df_display["Volum_Ratio"].apply(lambda x: f"{x}x")
         st.dataframe(df_display, height=600, use_container_width=True)
