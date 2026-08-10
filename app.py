@@ -3,6 +3,7 @@ import pandas as pd
 import yfinance as yf
 import plotly.express as px
 import time
+import requests
 
 st.set_page_config(page_title="Oslo Børs Momentumskanner", page_icon="📊", layout="wide")
 
@@ -19,15 +20,17 @@ TICKERS = [
     "KID.OL", "BOUV.OL", "LINK.OL", "PHO.OL"
 ]
 
-@st.cache_data(ttl=120) # Cacher dataen i 2 minutter så nettsiden laster lynraskt for deg
+@st.cache_data(ttl=120) # Oppdaterer dataen automatisk hvert 2. minutt
 def analyze_stocks():
     scored_data = []
-    session = yf.utils.get_tangled_session()
-    session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+    
+    # OPPDATERING: Ny, stabil standard-metode for opprettelse av sesjon mot Yahoo
+    session = requests.Session()
+    session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
     
     for ticker in TICKERS:
         try:
-            time.sleep(0.05)
+            time.sleep(0.05) # Liten pause så vi ikke blir sperret
             stock = yf.Ticker(ticker, session=session)
             df = stock.history(period="45d", interval="1d")
             
@@ -48,6 +51,7 @@ def analyze_stocks():
             if pd.isna(latest_close) or pd.isna(ema9) or pd.isna(ema21) or pd.isna(volume_ratio):
                 continue
                 
+            # --- AGGRESSIV MATEMATISK SCORING (0 - 100) ---
             pct_above_ema9 = ((latest_close - ema9) / ema9) * 100
             ema_spread = ((ema9 - ema21) / ema21) * 100
             
@@ -84,7 +88,7 @@ def analyze_stocks():
 
 # --- WEB-VISNING ---
 st.title("🚀 Oslo Børs Matematisk Momentumskanner")
-st.write("Dette kontrollpanelet rangerer aksjer i sanntid basert på volumavvik og trendlinje-spredning.")
+st.write("Dette kontrollpanelet rangerer aksjer live basert på volumavvik og trendlinje-spredning.")
 
 if st.button("🔄 Manuelt oppdater data nå"):
     st.cache_data.clear()
@@ -93,20 +97,20 @@ with st.spinner("Henter og kalkulerer rådata fra Oslo Børs..."):
     df_res = analyze_stocks()
 
 if df_res.empty:
-    st.error("Klarte ikke å hente markedsdata akkurat nå. Vennligst prøv igjen om litt.")
+    st.error("Forbereder datastrømmen. Vennligst vent noen sekunder eller trykk på oppdateringsknappen.")
 else:
-    col1, col2 = st.columns([1, 1])
+    col1, col2 = st.columns([1, 1.2]) # Balanserer bredden på kolonnene
     
     with col1:
-        st.subheader("🔥 Ekte Momentum-Ledere (Topp 15)")
+        st.subheader("🔥 Reelle Momentum-Ledere (Topp 15)")
         fig = px.bar(df_res.head(15), x='Super_Score', y='Aksje', orientation='h',
                      color='Super_Score', color_continuous_scale='Turbo', template='plotly_dark')
-        fig.update_layout(yaxis={'categoryorder':'total ascending'}, height=500)
+        fig.update_layout(yaxis={'categoryorder':'total ascending'}, height=600)
         st.plotly_chart(fig, use_container_width=True)
         
     with col2:
         st.subheader("📊 Presisjonstabell for Daytrading")
-        # Formater tabellen pent med farger for høye scorer og høyt volum
+        # Formaterer tabellvisningen
         df_display = df_res.copy()
         df_display["Volum_Ratio"] = df_display["Volum_Ratio"].apply(lambda x: f"{x}x")
-        st.dataframe(df_display, height=500, use_container_width=True)
+        st.dataframe(df_display, height=600, use_container_width=True)
